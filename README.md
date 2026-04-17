@@ -8,7 +8,7 @@
 - `backend/` - FastAPI ML API с `POST /api/analyze`
 - `docker-compose.yml` - локальный запуск двух сервисов
 
-## End-to-End Flow
+## Сквозной поток
 
 Пайплайн работает так:
 
@@ -19,9 +19,22 @@
 5. ML runtime считает multimodal, visual, document, retrieval и card-aware сигналы
 6. финальный blend возвращает ranking изображений, общий score, рекомендации и suggested description
 
-## ML Architecture
+## ML-архитектура
 
 Backend построен как модульный ensemble, а не как одна монолитная модель.
+
+### Архитектура по слоям
+
+1. Frontend собирает `title`, `description` и массив изображений.
+2. Backend декодирует изображения, прогревает runtime и поднимает доступные модели.
+3. На каждом изображении считаются:
+   - transformer image-text признаки
+   - prompt-based zero-shot признаки
+   - cheap visual / layout признаки
+   - card-aware признаки внутри `card_identifier_id`
+4. Если доступны локальные артефакты, включается recovered runtime.
+5. Отдельно работает `fp_specialist` для hard false positives.
+6. Финальный score получается через blend recovered runtime, specialists и online fallback.
 
 ### Модули
 
@@ -34,11 +47,48 @@ Backend построен как модульный ensemble, а не как од
 - `backend/app/ml/warmup.py` - прогрев моделей при старте сервиса
 - `backend/app/ml/description_generator.py` - генерация suggested description через Gemma, если она доступна
 
-### Основные ветки scoring
+### Transformer-путь
+
+Для image-text scoring мы используем HF transformer-модели в frozen режиме:
+
+- `SigLIP` - сравнивает изображение и текст карточки
+- `CLIP` - оценивает соответствие изображения семействам prompt-ов
+
+Схема входа:
+
+- `text` - `title`, `description` или `title + description`
+- `images` - список `PIL.Image`
+- `padding=True` - паддинг текстовых батчей
+- `truncation=True` - обрезка длинного текста
+- `return_tensors="pt"` - tensor output для torch
+
+На выходе используются:
+
+- `pixel_values` - вход в image tower
+- `input_ids` - вход в text tower
+- `attention_mask` - маска токенов
+- `image_embeds` / `text_embeds` - эмбеддинги для similarity
+
+### `fp_specialist`
+
+`fp_specialist` - отдельный узкий эксперт для hard false positives.
+
+Он нужен, чтобы лучше ловить:
+
+- таблицы размеров
+- сертификаты
+- инфографику
+- рекламные баннеры
+- изображения, где товар маленький и теряется на фоне служебной графики
+
+В финальном ensemble он не доминирует, а дает небольшой, но полезный corrective signal.
+
+### Основные ветки скоринга
 
 - `SigLIP` image-text judge - согласованность изображения и `title + description`
 - `CLIP` prompt taxonomy judge - product/document/banner/size chart/logo/ambiguous families
 - `v2` recovered supervised ensemble - baseline, image-only, multimodal, stacker
+- `fp_specialist` - hard FP specialist для document-like и banner-like кадров
 - `v4.1` card reranker - переоценка изображения внутри карточки
 - `Gemma` description editor - улучшение описания карточки
 
@@ -63,9 +113,12 @@ Backend построен как модульный ensemble, а не как од
    - `multimodal_model_full.joblib`
    - `stacker_model.joblib`
    - `card_reranker_seed_*.joblib`
+   - `fp_specialist` если есть соответствующий артефакт
 5. Финальный score = blend recovered runtime + online fallback
 
-## API Contract
+Именно такой recovered runtime ближе всего к сильному `v11`-стеку: supervised experts, card-aware reranking, routing на hard false positives и маленькая добавка zero-shot transformer judges.
+
+## API-контракт
 
 ### `GET /health`
 
@@ -77,7 +130,7 @@ Backend построен как модульный ensemble, а не как од
 
 ### `POST /api/analyze`
 
-#### Request fields
+#### Поля запроса
 
 - `title` - название карточки
 - `description` - описание карточки
@@ -89,7 +142,7 @@ Backend построен как модульный ensemble, а не как од
 - `images[].alt` - alt text, если есть
 - `images[].caption` - caption, если есть
 
-#### Response fields
+#### Поля ответа
 
 - `overallScore` - общий score карточки
 - `rankedImages` - изображения, отсортированные по релевантности
@@ -98,7 +151,7 @@ Backend построен как модульный ensemble, а не как од
 - `suggestedRankedImages` - ranking для suggested description
 - `recommendations` - короткие рекомендации по карточке
 
-## Input Parameters in ML Stack
+## Параметры входа в ML-стек
 
 ### SigLIP judge
 
@@ -140,7 +193,15 @@ Backend построен как модульный ensemble, а не как од
 - `sim_to_top1_pred_image` - similarity до лучшего фото карточки
 - `sim_margin_strong_weak_card` - margin между strong и weak частью карточки
 
-## Runtime and Warmup
+### `fp_specialist`
+
+- `document_like_score` - насколько изображение похоже на документный или служебный кадр
+- `banner_like_score` - насколько кадр похож на рекламный баннер
+- `size_chart_score` - насколько похожа таблица размеров
+- `hard_fp_margin` - разница между товарным и служебным классом
+- `router_conflict` - конфликт между товарным и document-like сигналом
+
+## Runtime и warmup
 
 При старте backend:
 
@@ -153,7 +214,7 @@ Backend построен как модульный ensemble, а не как од
 
 Если `WB_USE_GEMMA=1`, backend пытается сгенерировать suggested description через Gemma, а при ошибке уходит в алгоритмический fallback.
 
-## ML Parameters and Environment
+## ML-параметры и окружение
 
 - `NEXT_PUBLIC_API_BASE_URL` - адрес backend для frontend
 - `NEXT_PUBLIC_USE_MOCK_API` - включить mock API на frontend
@@ -166,7 +227,7 @@ Backend построен как модульный ensemble, а не как од
 - `WB_SIGLIP_MODEL` - имя SigLIP модели
 - `WB_CLIP_MODEL` - имя CLIP модели
 
-## Local Run
+## Локальный запуск
 
 ### Через Docker
 
@@ -200,9 +261,9 @@ bun install
 bun dev
 ```
 
-## Version History and Hypotheses
+## История версий и гипотез
 
-### Summary Table
+### Сводная таблица
 
 | Version | Hypothesis | Main Change | Result | Verdict |
 | --- | --- | --- | --- | --- |
@@ -222,7 +283,7 @@ bun dev
 | v17 | Pseudo-labeling confident test will reduce shift | pseudo labels + retrain meta stack | no improvement over v15 | not helpful |
 | v18.1 | Freeze backbone, train only projection head | projection-head-only binary training | model stayed near `0.5` | failed as trained |
 
-### What each version tested
+### Что проверяла каждая версия
 
 - v0 / baseline - can a simple similarity-based multimodal model solve the task?
 - v2 - do supervised experts and stacker matter more than one encoder?
@@ -238,7 +299,7 @@ bun dev
 - v17 - does pseudo-labeling help the meta layer?
 - v18.1 - can we fine-tune only the projection head and get a useful cheap gain?
 
-## What Worked Best
+## Что сработало лучше всего
 
 - supervised experts
 - stacker/blend over multiple views
@@ -246,14 +307,14 @@ bun dev
 - `fp_specialist` for hard false positives
 - small diverse zero-shot expert on top of a strong stack
 
-## What Did Not Help Enough
+## Что не дало заметного прироста
 
 - OCR as a core feature block
 - naive averaging of best submissions
 - pseudo-labeling of confident test predictions
 - projection-head-only fine-tuning in the current setup
 
-## Frontend Contract
+## Контракт фронтенда
 
 Frontend отправляет данные в backend и показывает:
 
@@ -267,17 +328,28 @@ Frontend отправляет данные в backend и показывает:
 - `frontend/src/shared/api/product-card-analysis.ts`
 - `frontend/src/features/file-loader/model/use-step-4-analyze-trigger.ts`
 
-## Limitations
+## Ограничения
 
 - exact leaderboard ensemble не всегда можно воспроизвести 1:1 как online runtime
 - первые загрузки HF моделей могут быть долгими
 - fallback-ветка хуже recovered runtime
 - качество сильно зависит от того, доступны ли локальные артефакты прошлых версий
 
-## Deployment Notes
+## Примечания по деплою
 
 - backend можно деплоить отдельно от frontend
 - frontend ждет backend через `NEXT_PUBLIC_API_BASE_URL`
 - для локальных ML артефактов укажите `WB_ARTIFACT_ROOT`
 - если хотите строгий startup, включите `WB_STRICT_WARMUP=1`
 
+## Краткая ML-структура для разработчиков
+
+- `frontend` - собирает карточку и отправляет ее в backend
+- `backend` - оркеструет inference и форматирует ответ
+- `SigLIP` - основной image-text judge
+- `CLIP` - zero-shot prompt judge по классам релевантности
+- `v2 runtime` - восстановленный supervised ensemble
+- `v4.1 reranker` - card-aware переоценка
+- `fp_specialist` - отдельный специалист по hard false positives
+- `Gemma` - генерация suggested description
+- `warmup` - заранее поднимает модели, чтобы первый запрос не тормозил
