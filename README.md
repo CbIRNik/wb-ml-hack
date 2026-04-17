@@ -285,19 +285,19 @@ bun dev
 
 ### Что проверяла каждая версия
 
-- v0 / baseline - can a simple similarity-based multimodal model solve the task?
-- v2 - do supervised experts and stacker matter more than one encoder?
-- v3 - does global retrieval context help?
-- v4 / v4.1 - does reranking inside card help?
-- v8 / v10 - does set/card context and routing help?
-- v11 - can we combine strong experts into one stable ensemble?
-- v12 - do mini VLM experts add diversity?
-- v13 - can zero-shot SigLIP + CLIP prompts add a new view?
-- v14 - can we squeeze extra quality with a fast meta-blend?
-- v15 - is a weak but diverse zero-shot SigLIP expert useful in the final blend?
-- v16 - does multi-prompt zero-shot improve over single-prompt?
-- v17 - does pseudo-labeling help the meta layer?
-- v18.1 - can we fine-tune only the projection head and get a useful cheap gain?
+- v0 / baseline - может ли простая multimodal-модель на similarity решить задачу?
+- v2 - важнее ли supervised experts и stacker, чем один encoder?
+- v3 - помогает ли глобальный retrieval-контекст?
+- v4 / v4.1 - помогает ли reranking внутри карточки?
+- v8 / v10 - помогает ли set/card context и routing?
+- v11 - можно ли собрать сильные эксперты в один стабильный ensemble?
+- v12 - добавляют ли mini-VLM эксперты разнообразие?
+- v13 - может ли zero-shot SigLIP + CLIP prompts дать новый сигнал?
+- v14 - можно ли добрать качество быстрым meta-blend?
+- v15 - полезен ли слабый, но разнообразный zero-shot SigLIP эксперт в финальном blend?
+- v16 - лучше ли multi-prompt zero-shot, чем single-prompt?
+- v17 - помогает ли pseudo-labeling meta-уровню?
+- v18.1 - можно ли дообучить только projection head и получить дешевый, но полезный прирост?
 
 ## Что сработало лучше всего
 
