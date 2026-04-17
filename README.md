@@ -2,13 +2,13 @@
 
 Готовый deliverable для жюри:
 
-- `frontend/` — фронтенд на Next.js, привязан к реальному HTTP backend
-- `backend/` — FastAPI backend с endpoint `POST /api/analyze`, использующий recovered `v11-runtime`
-- `docker-compose.yml` — запуск обоих сервисов без ручных правок
+- `frontend/` — Next.js приложение + Vercel Python API в одном deployable проекте
+- `backend/` — отдельный Python runtime, оставлен для локальной разработки и reference
+- `docker-compose.yml` — запуск frontend + backend
 
 ## Что делает backend
 
-Backend принимает:
+Runtime принимает:
 
 - `title`
 - `description`
@@ -27,21 +27,13 @@ Backend принимает:
 - `suggestedRankedImages`
 - `recommendations`
 
-Внутри backend используется отдельный модуль `backend/app/ml/` с recovered `v11-runtime` логикой:
+Для Vercel используется `frontend/api/index.py` + `frontend/ml_backend/`:
 
-- реальные сохраненные `v2` модели:
-  - `baseline_model.joblib`
-  - `image_model_full.joblib`
-  - `multimodal_model_full.joblib`
-  - `stacker_model.joblib`
-- реальные сохраненные `v4.1` card reranker модели
-- online fallback-ветка:
-  - `SigLIP` image-text judge
-  - `CLIP` prompt taxonomy judge
-  - layout/document признаки
-  - card-aware ranking внутри текущей карточки
+- Next.js отдает UI
+- Python runtime на Vercel отдает `/api/analyze`, `/api/health`, `/api/warmup`
+- модели греются на startup FastAPI app
 
-То есть backend сначала пытается поднять восстановленный runtime из артефактов прошлых версий, а если часть весов недоступна или окружение не дотягивает HF-модели, уходит в безопасный `v11-like` fallback без падения API.
+Папка `backend/` сохранена как отдельный локальный runtime.
 
 ## Структура
 
@@ -67,11 +59,8 @@ backend/
 
 ### Локальный запуск без Docker
 
-- Python `3.11+`
 - Node.js `20+`
-- npm `10+`
-- интернет на первом запуске backend для скачивания HF-весов fallback-ветки
-- локальные артефакты проекта в репозитории или путь к ним через `WB_ARTIFACT_ROOT`
+- Bun `1+`
 
 ### Запуск через Docker
 
@@ -80,53 +69,23 @@ backend/
 
 ## Запуск без Docker
 
-### 1. Backend
+### 1. Vercel deploy
+
+Импортируйте в Vercel папку `frontend/` как project root.
+
+Важно:
+
+- frontend и backend едут одним Vercel project
+- Python API entrypoint: `frontend/api/index.py`
+- если нужны реальные `v2` / `v4.1` артефакты, положите их в `frontend/artifacts/` или задайте `WB_ARTIFACT_ROOT`
+
+### 2. Локально
 
 ```bash
-cd delivery_app/backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+docker compose up --build
 ```
 
-Если артефакты соревнования лежат не в корне этого репозитория, перед запуском выставьте:
-
-```bash
-export WB_ARTIFACT_ROOT=/absolute/path/to/wbhack2026
-```
-
-Проверка:
-
-```bash
-curl http://localhost:8000/health
-```
-
-Ожидается:
-
-```json
-{"status":"ok"}
-```
-
-Примечание:
-
-- первый запуск backend может занять больше времени, потому что скачиваются веса `SigLIP` и `CLIP`
-- дальше модель держится в памяти процесса и повторно не инициализируется на каждый запрос
-
-### 2. Frontend
-
-```bash
-cd delivery_app/frontend
-cp .env.example .env.local
-npm install
-npm run dev
-```
-
-Открыть:
-
-```text
-http://localhost:3000
-```
+Локально frontend ходит в `http://localhost:8000` через `NEXT_PUBLIC_API_BASE_URL`.
 
 ## Запуск через Docker
 
@@ -189,12 +148,12 @@ Response:
 }
 ```
 
-## Что поменяно во фронтенде
+## Что поменяно
 
-- убран чисто mock-only режим по умолчанию
-- добавлен реальный `fetch` в backend
-- перед отправкой изображения конвертируются в base64 data URL
-- контракт фронтенда и backend согласован
+- `frontend/api/index.py` добавлен как Vercel Python backend
+- `frontend/ml_backend/` содержит ML runtime внутри frontend project
+- fallback runtime из frontend вырезан
+- frontend по умолчанию бьет в same-origin `/api/analyze` на Vercel
 
 Файлы:
 
@@ -205,17 +164,17 @@ Response:
 
 Минимальная ручная проверка:
 
-1. поднять backend
-2. открыть frontend
+1. поднять frontend + backend
+2. открыть приложение
 3. ввести title и description
 4. загрузить хотя бы 1 изображение
 5. перейти к шагу анализа
 6. убедиться, что:
-   - backend отвечает без 500
+   - `POST /api/analyze` отвечает без 500
    - фронтенд показывает ranked images и scores
 
 ## Известные ограничения
 
-- часть `v11` веток в истории проекта сохранилась только как `OOF/submission`, а не как отдельные runtime-модели
-- поэтому backend сейчас использует максимально близкий recovered-runtime: реальные `v2`/`v4.1` модели плюс `v11-like` fallback
-- API-контракт при этом стабильный, так что ML-часть можно усиливать без правок фронтенда
+- для Vercel Python API нужны Python зависимости и доступные артефакты/модели
+- локально через `next dev` root-level Python `/api/*.py` не поднимется; для полного Vercel-подобного режима нужен `docker compose` или `vercel dev`
+- точный `v2`/`v4.1` runtime требует реальные `.joblib` артефакты в `frontend/artifacts/` или через `WB_ARTIFACT_ROOT`
