@@ -6,6 +6,8 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
+ENV NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+
 RUN bun run build
 
 EXPOSE 3000
