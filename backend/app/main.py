@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
 
 from fastapi import FastAPI
 from fastapi import HTTPException
@@ -13,7 +14,8 @@ from .service import analyze_product_card, warmup_runtime
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     status = warmup_runtime()
-    if not status.ready:
+    strict_warmup = os.getenv("WB_STRICT_WARMUP", "0") == "1"
+    if strict_warmup and not status.ready:
         raise RuntimeError("ML warmup failed: SigLIP or CLIP model not loaded")
     yield
 

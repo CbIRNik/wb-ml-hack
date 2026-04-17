@@ -14,6 +14,10 @@ logger = logging.getLogger(__name__)
 EPS = 1e-6
 
 
+def _hf_disabled() -> bool:
+    return os.getenv("WB_DISABLE_HF_MODELS", "0") == "1"
+
+
 class _BaseHFModel:
     def __init__(self, model_name: str) -> None:
         import torch
@@ -128,6 +132,9 @@ class ClipPromptJudge(_BaseHFModel):
 
 @lru_cache(maxsize=1)
 def get_siglip_judge() -> SiglipTextJudge | None:
+    if _hf_disabled():
+        logger.info("WB_DISABLE_HF_MODELS=1, SigLIP disabled")
+        return None
     try:
         return SiglipTextJudge()
     except Exception as exc:
@@ -137,6 +144,9 @@ def get_siglip_judge() -> SiglipTextJudge | None:
 
 @lru_cache(maxsize=1)
 def get_clip_prompt_judge() -> ClipPromptJudge | None:
+    if _hf_disabled():
+        logger.info("WB_DISABLE_HF_MODELS=1, CLIP prompt judge disabled")
+        return None
     try:
         return ClipPromptJudge()
     except Exception as exc:
@@ -243,6 +253,9 @@ class FrozenMultimodalEncoder:
 
 @lru_cache(maxsize=1)
 def get_v2_image_encoder() -> FrozenImageEncoder | None:
+    if _hf_disabled():
+        logger.info("WB_DISABLE_HF_MODELS=1, v2 image encoder disabled")
+        return None
     try:
         return FrozenImageEncoder(
             [
@@ -257,6 +270,9 @@ def get_v2_image_encoder() -> FrozenImageEncoder | None:
 
 @lru_cache(maxsize=1)
 def get_v2_multimodal_encoder() -> FrozenMultimodalEncoder | None:
+    if _hf_disabled():
+        logger.info("WB_DISABLE_HF_MODELS=1, v2 multimodal encoder disabled")
+        return None
     try:
         return FrozenMultimodalEncoder(
             [
