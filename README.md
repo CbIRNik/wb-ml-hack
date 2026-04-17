@@ -76,3 +76,4 @@ Backend деплой отдельно:
 - если `NEXT_PUBLIC_API_BASE_URL` не задан в production, frontend выбросит явную ошибку
 - endpoint path у backend остается `/api/analyze`
 - в `docker compose` по умолчанию `WB_DISABLE_HF_MODELS=1`, чтобы backend стартовал без долгой загрузки HF-моделей; для полного ML поставьте `WB_DISABLE_HF_MODELS=0`
+- улучшение описания сначала идет через локальную Gemma (`WB_USE_GEMMA=1`, `WB_GEMMA_MODEL=google/gemma-2-2b-it`), при ошибке загрузки/генерации включается алгоритмический fallback

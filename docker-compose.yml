@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     environment:
       WB_DISABLE_HF_MODELS: ${WB_DISABLE_HF_MODELS:-1}
+      WB_USE_GEMMA: ${WB_USE_GEMMA:-1}
+      WB_GEMMA_MODEL: ${WB_GEMMA_MODEL:-google/gemma-2-2b-it}
     ports:
       - "8000:8000"
 

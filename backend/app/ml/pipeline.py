@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -11,6 +12,7 @@ from ..schemas import (
     AnalyzeProductCardRankedImage,
     AnalyzeProductCardResult,
 )
+from .description_generator import generate_description_with_gemma
 from .features import EPS, decode_image, extract_image_features, rank01, softmax_np, tokens
 from .models import (
     get_clip_prompt_judge,
@@ -38,6 +40,44 @@ NEGATIVE_HINTS = {
     "иконка",
     "документ",
     "чертеж",
+}
+
+DESCRIPTION_STOPWORDS = {
+    "это",
+    "этот",
+    "эта",
+    "эти",
+    "для",
+    "при",
+    "без",
+    "или",
+    "как",
+    "что",
+    "чтобы",
+    "также",
+    "очень",
+    "более",
+    "самый",
+    "товар",
+    "модель",
+    "который",
+    "которая",
+    "которые",
+    "можно",
+    "будет",
+    "есть",
+    "если",
+    "под",
+    "над",
+    "после",
+    "перед",
+    "через",
+    "только",
+    "ваш",
+    "наша",
+    "ваша",
+    "имеет",
+    "имеют",
 }
 
 
@@ -307,15 +347,79 @@ def overall_score(ranked: list[AnalyzeProductCardRankedImage], bonus: int = 0) -
     return int(np.clip(round(20 + avg_top * 0.72 - weak * 5 + bonus), 1, 99))
 
 
-def build_suggested_description(title: str, description: str, ranked: list[AnalyzeProductCardRankedImage]) -> str:
-    base = description.strip() if description.strip() else title.strip()
-    notes = []
-    if ranked and ranked[0].score < 75:
-        notes.append("Сформулируйте в первых строках, как выглядит основной товар и что покупатель увидит на главном фото.")
-    if any(item.score < 45 for item in ranked):
-        notes.append("Разведите в описании основные фото товара и служебные материалы вроде таблиц размеров и инфографики.")
-    notes.append("Добавьте короткий тезис про материал, форму и сценарий использования.")
-    return "\n\n".join([base, *notes])
+def build_suggested_description(title: str, description: str, _ranked: list[AnalyzeProductCardRankedImage]) -> str:
+    title_clean = _normalize_spaces(title) or "Товар"
+    description_clean = _normalize_spaces(description)
+    source_sentences = _split_sentences(description_clean)
+    keywords = _extract_keywords(title_clean, description_clean, limit=8)
+    gemma_text = generate_description_with_gemma(
+        title=title_clean,
+        description=description_clean or title_clean,
+        keywords=keywords,
+    )
+    if gemma_text:
+        return gemma_text
+
+    summary_line = _to_sentence(source_sentences[0] if source_sentences else title_clean, max_len=180)
+    if title_clean.lower() in summary_line.lower():
+        first_paragraph = summary_line
+    else:
+        first_paragraph = f"{_to_sentence(title_clean, max_len=90)} {summary_line}"
+
+    improved_parts = [first_paragraph]
+    if len(source_sentences) > 1:
+        improved_parts.append(_to_sentence(source_sentences[1], max_len=190))
+
+    if keywords:
+        improved_parts.append(f"Ключевые характеристики: {', '.join(keywords[:6])}.")
+    else:
+        improved_parts.append("Ключевые характеристики: форма, материал, назначение, удобство в использовании.")
+
+    improved = "\n\n".join(part.strip() for part in improved_parts if part.strip())
+    if description_clean and _normalize_spaces(improved).lower() == description_clean.lower():
+        return f"{improved}\n\nОписание акцентирует преимущества товара и сценарии использования."
+    return improved
+
+
+def _normalize_spaces(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _split_sentences(text: str) -> list[str]:
+    if not text:
+        return []
+    chunks = re.split(r"(?:[.!?]+|\n+)", text)
+    return [_normalize_spaces(chunk) for chunk in chunks if _normalize_spaces(chunk)]
+
+
+def _to_sentence(text: str, max_len: int) -> str:
+    clean = _normalize_spaces(text)
+    if not clean:
+        return ""
+    clean = clean[:max_len].rstrip(" ,;:")
+    if not clean:
+        return ""
+    first = clean[0].upper()
+    rest = clean[1:]
+    sentence = f"{first}{rest}"
+    if sentence[-1] not in ".!?":
+        sentence = f"{sentence}."
+    return sentence
+
+
+def _extract_keywords(title: str, description: str, limit: int) -> list[str]:
+    text = _normalize_spaces(f"{title} {description}").lower()
+    words = re.findall(r"[a-zа-яё0-9-]{4,}", text, flags=re.IGNORECASE)
+    freq: dict[str, int] = {}
+    first_idx: dict[str, int] = {}
+    for idx, word in enumerate(words):
+        if word in DESCRIPTION_STOPWORDS or word.isdigit():
+            continue
+        if word not in first_idx:
+            first_idx[word] = idx
+        freq[word] = freq.get(word, 0) + 1
+    ranked = sorted(freq, key=lambda word: (-freq[word], first_idx[word], word))
+    return ranked[:limit]
 
 
 def recommendations(card_scores: list[CardScore]) -> list[str]:
