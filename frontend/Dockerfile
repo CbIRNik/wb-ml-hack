@@ -1,15 +1,12 @@
-FROM node:20-slim
+FROM oven/bun:1-slim
 
 WORKDIR /app
 COPY package.json bun.lock ./
-RUN npm install
+RUN bun install --frozen-lockfile
 
 COPY . .
 
-ENV NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-ENV NEXT_PUBLIC_USE_MOCK_API=false
-
-RUN npm run build
+RUN bun run build
 
 EXPOSE 3000
-CMD ["npm", "run", "start"]
+CMD ["bun", "run", "start"]
