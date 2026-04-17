@@ -1,14 +1,17 @@
 # WB Hack ML Delivery App
 
-Готовый deliverable для жюри:
+- `frontend/` — Next.js UI
+- `backend/` — Python ML API
+- `docker-compose.yml` — локальный запуск двух сервисов
 
-- `frontend/` — Next.js приложение + Vercel Python API в одном deployable проекте
-- `backend/` — отдельный Python runtime, оставлен для локальной разработки и reference
-- `docker-compose.yml` — запуск frontend + backend
+## Архитектура
 
-## Что делает backend
+Frontend отправляет запросы во внешний backend:
 
-Runtime принимает:
+- frontend -> `NEXT_PUBLIC_API_BASE_URL/api/analyze`
+- frontend -> `NEXT_PUBLIC_API_BASE_URL/health`
+
+Backend принимает:
 
 - `title`
 - `description`
@@ -16,9 +19,9 @@ Runtime принимает:
   - `id`
   - `name`
   - `size`
-  - `src` — base64 data URL изображения
+  - `src`
 
-И возвращает результат в формате, который уже ожидает фронтенд:
+И возвращает:
 
 - `overallScore`
 - `rankedImages`
@@ -27,69 +30,7 @@ Runtime принимает:
 - `suggestedRankedImages`
 - `recommendations`
 
-Для Vercel используется `frontend/api/index.py` + `frontend/ml_backend/`:
-
-- Next.js отдает UI
-- Python runtime на Vercel отдает `/api/analyze`, `/api/health`, `/api/warmup`
-- модели греются на startup FastAPI app
-
-Папка `backend/` сохранена как отдельный локальный runtime.
-
-## Структура
-
-```text
-delivery_app/
-backend/
-  app/
-    ml/
-    main.py
-    schemas.py
-    service.py
-  requirements.txt
-    Dockerfile
-  frontend/
-    src/...
-    .env.example
-    Dockerfile
-  docker-compose.yml
-  README.md
-```
-
-## Требования к окружению
-
-### Локальный запуск без Docker
-
-- Node.js `20+`
-- Bun `1+`
-
-### Запуск через Docker
-
-- Docker
-- Docker Compose
-
-## Запуск без Docker
-
-### 1. Vercel deploy
-
-Импортируйте в Vercel папку `frontend/` как project root.
-
-Важно:
-
-- frontend и backend едут одним Vercel project
-- Python API entrypoint: `frontend/api/index.py`
-- если нужны реальные `v2` / `v4.1` артефакты, положите их в `frontend/artifacts/` или задайте `WB_ARTIFACT_ROOT`
-
-### 2. Локально
-
-```bash
-docker compose up --build
-```
-
-Локально frontend ходит в `http://localhost:8000` через `NEXT_PUBLIC_API_BASE_URL`.
-
-## Запуск через Docker
-
-Из папки `delivery_app/`:
+## Локальный запуск
 
 ```bash
 docker compose up --build
@@ -100,81 +41,37 @@ docker compose up --build
 - frontend: `http://localhost:3000`
 - backend health: `http://localhost:8000/health`
 
-## API контракт
+Без Docker:
 
-### POST `/api/analyze`
-
-Request:
-
-```json
-{
-  "title": "Платье летнее",
-  "description": "Легкое платье из хлопка",
-  "images": [
-    {
-      "id": "1",
-      "name": "photo-1.jpg",
-      "size": 123456,
-      "src": "data:image/jpeg;base64,..."
-    }
-  ]
-}
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-Response:
-
-```json
-{
-  "overallScore": 81,
-  "rankedImages": [
-    {
-      "id": "1",
-      "score": 86,
-      "reason": "Фото хорошо поддерживает карточку и выглядит как основной товарный кадр."
-    }
-  ],
-  "suggestedDescription": "....",
-  "suggestedOverallScore": 85,
-  "suggestedRankedImages": [
-    {
-      "id": "1",
-      "score": 88,
-      "reason": "Фото хорошо поддерживает карточку и выглядит как основной товарный кадр."
-    }
-  ],
-  "recommendations": [
-    "Повторите в первых фото материал, сценарий и главный тезис описания."
-  ]
-}
+```bash
+cd frontend
+cp .env.example .env.local
+bun install
+bun dev
 ```
 
-## Что поменяно
+## Deploy
 
-- `frontend/api/index.py` добавлен как Vercel Python backend
-- `frontend/ml_backend/` содержит ML runtime внутри frontend project
-- fallback runtime из frontend вырезан
-- frontend по умолчанию бьет в same-origin `/api/analyze` на Vercel
+Frontend деплой отдельно:
 
-Файлы:
+- Vercel
+- env var: `NEXT_PUBLIC_API_BASE_URL=https://your-backend.example.com`
 
-- `frontend/src/shared/api/product-card-analysis.ts`
-- `frontend/src/features/file-loader/model/use-step-4-analyze-trigger.ts`
+Backend деплой отдельно:
 
-## Smoke test
+- любой Python host с Docker или Python 3.11+
+- нужны модели/артефакты и `WB_ARTIFACT_ROOT`, если они не лежат по default path
 
-Минимальная ручная проверка:
+## Важно
 
-1. поднять frontend + backend
-2. открыть приложение
-3. ввести title и description
-4. загрузить хотя бы 1 изображение
-5. перейти к шагу анализа
-6. убедиться, что:
-   - `POST /api/analyze` отвечает без 500
-   - фронтенд показывает ranked images и scores
-
-## Известные ограничения
-
-- для Vercel Python API нужны Python зависимости и доступные артефакты/модели
-- локально через `next dev` root-level Python `/api/*.py` не поднимется; для полного Vercel-подобного режима нужен `docker compose` или `vercel dev`
-- точный `v2`/`v4.1` runtime требует реальные `.joblib` артефакты в `frontend/artifacts/` или через `WB_ARTIFACT_ROOT`
+- встроенный backend из `frontend/` убран
+- если `NEXT_PUBLIC_API_BASE_URL` не задан в production, frontend выбросит явную ошибку
+- endpoint path у backend остается `/api/analyze`

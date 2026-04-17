@@ -50,10 +50,15 @@ const analyzeProductCard = async (
 };
 
 const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.trim().replace(/\/$/, "") ?? "";
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim().replace(/\/$/, "") ||
+  (process.env.NODE_ENV === "development" ? "http://localhost:8000" : "");
 
 const createHttpProductCardAnalysisApi = (): ProductCardAnalysisApi => ({
   analyze: async (payload, options) => {
+    if (!API_BASE_URL) {
+      throw new Error("NEXT_PUBLIC_API_BASE_URL is not configured");
+    }
+
     const controller = new AbortController();
     const timeout = window.setTimeout(
       () => controller.abort(),
